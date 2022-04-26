@@ -23,7 +23,7 @@ def quadratic(x): return x.dot(x)
 
 # Define the initial solution.
 DIMENSION = 10
-x0 = np.random.randn(10)
+x0 = np.random.randn(DIMENSION)
 
 result = regcma.solve(quadratic, x0)
 print(result)
