@@ -148,8 +148,11 @@ class RegCMA:
         # E[\mathcal{N}(0, I)]
         chi_n: float = 0.0
 
-    def __init__(self, fun, x0, **kwargs) -> None:
-        self.__option = self.__Option(**kwargs)
+    def __init__(self, fun, x0, option=None) -> None:
+        if option is not None:
+            self.__option = self.__Option(**option)
+        else:
+            self.__option = self.__Option()
         self.__fun = copy.deepcopy(fun)
         self.__x0 = copy.deepcopy(x0)
 
@@ -323,6 +326,7 @@ class RegCMA:
         cma = self.__cma
         option = self.__option
 
+        print(option.seed)
         self.__seed(option.seed)
         self.__set_start_time()
         self.__reset_function_call()
@@ -383,7 +387,7 @@ class RegCMA:
 
     def __update_state(self) -> None:
         # NOTE: Update the sampler state. The dependencies of sub-methods are
-        # described in docstring of each method.
+        # described in comment in each method.
 
         # Store the current state.
         self.__previous_state = copy.copy(self.__current_state)
@@ -431,18 +435,9 @@ class RegCMA:
         option = self.__option
 
         # Decompose the current covariance matrix of considering the step size.
-        (d, B) = np.linalg.eig(
+        L = np.linalg.cholesky(
             current_state.covariance_with_step_size +
             1E-20 * np.identity(current_state.dimension))
-
-        # Create an diagonal matrix whose elements are root of absolute values
-        # of the eigenvalues of the decomposed matrix. Absolute value
-        # calculations take into account when eigenvalues are negative due to
-        # numerical errors
-        D: Final(np.ndarray) = np.sqrt(np.abs(np.diag(d)))
-
-        # Compute a lower-triangle matrix.
-        L: Final(np.ndarray) = np.dot(B, D)
 
         for i in range(self.__cma.population_size):
             # Step 1: Sample random vectors from an appropriate standard
@@ -554,7 +549,7 @@ class RegCMA:
         cma = self.__cma
 
         # Compute the weighted center of y.
-        weighted_center_y = np.sum(
+        weighted_center_transformed_move = np.sum(
             [cma.weights[i] * current_state.transformed_moves[current_state.ranks[i]]
              for i in range(cma.half_population_size)], axis=0
         )
@@ -573,7 +568,8 @@ class RegCMA:
         # Update the evolution path with the mix-in ratios.
         current_state.evolution_path = (
             mixin_ratio_previous * previous_state.evolution_path
-            + mixin_ratio_current * weighted_center_y / previous_state.step_size
+            + mixin_ratio_current * weighted_center_transformed_move
+            / previous_state.step_size
         )
 
     def __update_conjugate_evolution_path(self) -> None:
@@ -588,7 +584,7 @@ class RegCMA:
         cma = self.__cma
 
         # Compute the weighted center of z.
-        weighted_center_z = np.sum(
+        weighted_center_raw_move = np.sum(
             [cma.weights[i] * current_state.raw_moves[current_state.ranks[i]]
              for i in range(cma.half_population_size)], axis=0
         )
@@ -607,7 +603,7 @@ class RegCMA:
         # Update the conjugate evolution path with the mix-in ratios.
         current_state.conjugate_evolution_path \
             = mixin_ratio_previous * previous_state.conjugate_evolution_path \
-            + mixin_ratio_current * weighted_center_z
+            + mixin_ratio_current * weighted_center_raw_move
 
     def __update_step_size(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -636,7 +632,7 @@ class RegCMA:
         cma = self.__cma
 
         # Compute the weighted center of x.
-        weighted_center_x = np.sum(
+        weighted_center_solution = np.sum(
             [cma.weights[i] * current_state.solutions[current_state.ranks[i]]
              for i in range(cma.half_population_size)], axis=0
         )
@@ -644,7 +640,7 @@ class RegCMA:
         # Update the center vector of the sampler with the mix-in ratios.
         current_state.center = (
             (1-cma.learning_rate_center) * current_state.center
-            + cma.learning_rate_center * weighted_center_x
+            + cma.learning_rate_center * weighted_center_solution
         )
 
     def __update_covariance(self) -> None:
@@ -878,7 +874,7 @@ class RegCMA:
         print('------+------------------+---------+-------------------+-------------------+---------')
 
 
-def solve(fun, x0, **kwargs):
+def solve(fun, x0, option=None):
     """ RegCMA solver Interface
 
     Parameters
@@ -892,8 +888,13 @@ def solve(fun, x0, **kwargs):
     **kwargs: dict
         Pairs of option key/value to configure the solver.
 
+    Returns
+    ------
+    dict
+        optimization result 
+
     """
-    solver = RegCMA(fun, x0, **kwargs)
+    solver = RegCMA(fun, x0, option)
     return solver.solve()
 
 ################################################################################
