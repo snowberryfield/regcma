@@ -57,8 +57,8 @@ class RegCMA:
         step_size_and_covariance_normalize_threshold: float = 10.0  # exp
 
         # RES options and their initial values.
-        external_internal_regulator: float = 1.0
-        decay_rate: float = 1.0
+        external_regulator: float = 1.0
+        attenuator: float = 1.0
         delta_limit: float = 5.0  # exp
 
         # CMA options and their initial values;
@@ -326,7 +326,6 @@ class RegCMA:
         cma = self.__cma
         option = self.__option
 
-        print(option.seed)
         self.__seed(option.seed)
         self.__set_start_time()
         self.__reset_function_call()
@@ -437,25 +436,28 @@ class RegCMA:
         # Decompose the current covariance matrix of considering the step size.
         L = np.linalg.cholesky(
             current_state.covariance_with_step_size +
-            1E-20 * np.identity(current_state.dimension))
+            1E-20 * np.identity(current_state.dimension)
+        )
 
         for i in range(self.__cma.population_size):
             # Step 1: Sample random vectors from an appropriate standard
             # multivariate normal distribution
             current_state.raw_moves[i] = np.random.randn(
-                current_state.dimension)
+                current_state.dimension
+            )
 
             # Step 2: Transform the random vectors with the prepared lower-
             # triangle matrix.
             current_state.transformed_moves[i] = L.dot(
-                current_state.raw_moves[i])
+                current_state.raw_moves[i]
+            )
 
             # Step 3: Shift and scale the transformed random vectors. The
             # obtained vector could be final sample to be evaluated at each
             # iteration.
             current_state.solutions[i] = (
                 current_state.center
-                + np.sqrt(option.external_internal_regulator *
+                + np.sqrt(option.external_regulator *
                           current_state.internal_regulator)
                 * current_state.transformed_moves[i]
             )
@@ -490,7 +492,8 @@ class RegCMA:
         else:
             for i in range(self.__cma.population_size):
                 current_state.objectives[i] = self.__fun(
-                    current_state.solutions_evaluate[i])
+                    current_state.solutions_evaluate[i]
+                )
 
         # Compute the penalty value for each sample.
         for i in range(self.__cma.population_size):
@@ -534,7 +537,8 @@ class RegCMA:
 
         if current_state.objectives[best_index] < current_state.incumbent_objective:
             current_state.incumbent_objective = current_state.objectives[best_index]
-            current_state.incumbent_solution = current_state.solutions[best_index].copy(
+            current_state.incumbent_solution = (
+                current_state.solutions[best_index].copy()
             )
 
     def __update_evolution_path(self) -> None:
@@ -601,9 +605,10 @@ class RegCMA:
         )
 
         # Update the conjugate evolution path with the mix-in ratios.
-        current_state.conjugate_evolution_path \
-            = mixin_ratio_previous * previous_state.conjugate_evolution_path \
+        current_state.conjugate_evolution_path = (
+            mixin_ratio_previous * previous_state.conjugate_evolution_path
             + mixin_ratio_current * weighted_center_raw_move
+        )
 
     def __update_step_size(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -619,7 +624,8 @@ class RegCMA:
         # Update the step size with the updated conjugate evolution path.
         current_state.step_size *= np.exp(
             (cma.learning_rate_conjugate_evolution_path / cma.step_size_damper)
-            * (np.linalg.norm(current_state.conjugate_evolution_path) / cma.chi_n - 1.0))
+            * (np.linalg.norm(current_state.conjugate_evolution_path) / cma.chi_n - 1.0)
+        )
 
     def __update_center(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -664,10 +670,10 @@ class RegCMA:
             self_dyad(current_state.evolution_path)
         )
 
-        mixin_ratio_rank_mu = (
-            np.sum([cma.weights[i]
-                    * self_dyad(current_state.transformed_moves[current_state.ranks[i]])
-                    for i in range(cma.half_population_size)], axis=0)
+        mixin_ratio_rank_mu = (np.sum(
+            [cma.weights[i]
+             * self_dyad(current_state.transformed_moves[current_state.ranks[i]])
+             for i in range(cma.half_population_size)], axis=0)
             / pow(previous_state.step_size, 2.0)
         )
 
@@ -693,13 +699,15 @@ class RegCMA:
         current_state = self.__current_state
 
         current_state.covariance = (
-            current_state.covariance
-            * pow(current_state.step_size, 2.0))
+            current_state.covariance * pow(current_state.step_size, 2.0)
+        )
         current_state.step_size = 1.0
         current_state.covariance_with_step_size = current_state.covariance
 
         current_state.conjugate_evolution_path = np.zeros(
-            current_state.dimension)
+            current_state.dimension
+        )
+
         current_state.evolution_path = np.zeros(current_state.dimension)
 
     def __update_dispersion(self) -> None:
@@ -719,7 +727,7 @@ class RegCMA:
 
         # Update the dispersion.
         current_state.dispersion = (
-            option.external_internal_regulator * previous_state.internal_regulator
+            option.external_regulator * previous_state.internal_regulator
             * np.trace(previous_state.covariance_with_step_size)
             * np.exp(np.trace(np.cov(current_state.transformed_moves.T))
                      / np.trace(previous_state.covariance_with_step_size) - 1.0)
@@ -731,7 +739,7 @@ class RegCMA:
         option = self.__option
 
         # Update the theoretical dispersion.
-        current_state.dispersion_reference *= option.external_internal_regulator
+        current_state.dispersion_reference *= option.external_regulator
 
     def __bound_step_size_and_covariance(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -784,8 +792,8 @@ class RegCMA:
         current_state.internal_regulator = (
             pow(current_state.dispersion
                 / np.trace(current_state.covariance_with_step_size),
-                1.0 - option.decay_rate)
-            * pow(current_state.internal_regulator, option.decay_rate)
+                1.0 - option.attenuator)
+            * pow(current_state.internal_regulator, option.attenuator)
         )
 
     def __update_convergence_index(self) -> None:
@@ -797,7 +805,8 @@ class RegCMA:
 
         # Update the convergence index.
         current_state.convergence_index = np.mean(
-            np.var(current_state.solutions, axis=0))
+            np.var(current_state.solutions, axis=0)
+        )
 
     def __set_start_time(self) -> None:
         self.__current_state.start_time = datetime.now()
@@ -864,11 +873,12 @@ class RegCMA:
             np.mean(current_state.objectives),
             np.std(current_state.objectives),
             current_state.incumbent_objective,
-            option.external_internal_regulator,
+            option.external_regulator,
             current_state.internal_regulator,
             current_state.step_size,
             current_state.covariance.trace(),
-            current_state.convergence_index))
+            current_state.convergence_index)
+        )
 
     def __print_state_footer(self) -> None:
         print('------+------------------+---------+-------------------+-------------------+---------')
