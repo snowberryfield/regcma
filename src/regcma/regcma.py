@@ -33,10 +33,11 @@
 
 import copy
 import numpy as np
+
+from pathos.multiprocessing import ProcessingPool
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Final
-from multiprocessing import Pool
 
 
 class RegCMA:
@@ -67,7 +68,7 @@ class RegCMA:
         learning_rate_covariance_rank_mu: float = None
 
         # Parallelization
-        pool: Pool = None
+        number_of_parallels: int = 1
 
     @dataclass
     class __State:
@@ -161,6 +162,11 @@ class RegCMA:
 
         # Initialize the sampler state.
         self.__initialize_state()
+
+        # Setup multiprocess pool
+        self.__pool = None
+        if self.__option.number_of_parallels > 1:
+            self.__pool = ProcessingPool(self.__option.number_of_parallels)
 
     def __setup_cma_parameter(self) -> None:
         """
@@ -486,8 +492,8 @@ class RegCMA:
                 )
 
         # Compute the objective function value for each sample.
-        if option.pool:
-            current_state.objectives = option.pool.map(
+        if self.__pool:
+            current_state.objectives = self.__pool.map(
                 self.__fun, current_state.solutions_evaluate)
         else:
             for i in range(self.__cma.population_size):
