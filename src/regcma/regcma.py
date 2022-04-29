@@ -823,7 +823,7 @@ class RegCMA:
 
     def __update_elapsed_time(self) -> None:
         self.__current_state.elapsed_time = (
-            (datetime.now() - self.__current_state.start_time).microseconds
+            (datetime.now() - self.__current_state.start_time).total_seconds()
         )
 
     def __reset_function_call(self) -> None:
@@ -849,7 +849,7 @@ class RegCMA:
             'status': {
                 'start_time': current_state.start_time.isoformat(),
                 'end_time': current_state.end_time.isoformat(),
-                'elapsed_time': current_state.elapsed_time / 1000,
+                'elapsed_time': current_state.elapsed_time,
                 'function call': current_state.function_call,
             },
             'incumbent': {
