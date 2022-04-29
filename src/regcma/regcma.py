@@ -54,6 +54,7 @@ class RegCMA:
         lower_bounds: np.ndarray = None
         upper_bounds: np.ndarray = None
         penalty_coefficient: float = 1E7
+        verbose: bool = True
         log_interval: int = 100
         step_size_and_covariance_normalize_threshold: float = 10.0  # exp
 
@@ -336,7 +337,9 @@ class RegCMA:
         self.__set_start_time()
         self.__reset_function_call()
         self.__reset_iteration()
-        self.__print_state_head()
+
+        if option.verbose:
+            self.__print_state_head()
 
         is_state_printed_in_last_iteration = False
         while True:
@@ -364,7 +367,7 @@ class RegCMA:
                 satisfy_terminating_condition = True
 
             if satisfy_terminating_condition:
-                if not is_state_printed_in_last_iteration:
+                if not is_state_printed_in_last_iteration and option.verbose:
                     self.__print_state_body()
                 break
 
@@ -377,8 +380,9 @@ class RegCMA:
             # Print log for the specified interval
             if current_state.iteration % option.log_interval == 0 \
                     or current_state.convergence_index < option.convergence_tolerance:
-                self.__print_state_body()
-                is_state_printed_in_last_iteration = True
+                if option.verbose:
+                    self.__print_state_body()
+                    is_state_printed_in_last_iteration = True
             else:
                 is_state_printed_in_last_iteration = False
 
