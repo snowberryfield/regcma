@@ -33,10 +33,11 @@
 
 import copy
 import numpy as np
+
+from pathos.multiprocessing import ProcessingPool
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Final
-from multiprocessing import Pool
 
 
 class RegCMA:
@@ -45,20 +46,21 @@ class RegCMA:
         # Common options and their initial values.
         seed: int = 0
         population_size: int = None
-        time_max: float = 120.0
+        time_max: float = None
         iteration_max: int = 100000
-        function_call_max: int = 100000
+        function_call_max: int = None
         initial_covariance: float = 1E0
         convergence_tolerance: float = 1E-10
         lower_bounds: np.ndarray = None
         upper_bounds: np.ndarray = None
         penalty_coefficient: float = 1E7
+        verbose: bool = True
         log_interval: int = 100
         step_size_and_covariance_normalize_threshold: float = 10.0  # exp
 
         # RES options and their initial values.
-        external_internal_regulator: float = 1.0
-        decay_rate: float = 1.0
+        external_regulator: float = 1.0
+        attenuator: float = 1.0
         delta_limit: float = 5.0  # exp
 
         # CMA options and their initial values;
@@ -67,7 +69,7 @@ class RegCMA:
         learning_rate_covariance_rank_mu: float = None
 
         # Parallelization
-        pool: Pool = None
+        number_of_parallels: int = 1
 
     @dataclass
     class __State:
@@ -148,8 +150,11 @@ class RegCMA:
         # E[\mathcal{N}(0, I)]
         chi_n: float = 0.0
 
-    def __init__(self, fun, x0, **kwargs) -> None:
-        self.__option = self.__Option(**kwargs)
+    def __init__(self, fun, x0, option=None) -> None:
+        if option is not None:
+            self.__option = self.__Option(**option)
+        else:
+            self.__option = self.__Option()
         self.__fun = copy.deepcopy(fun)
         self.__x0 = copy.deepcopy(x0)
 
@@ -158,6 +163,11 @@ class RegCMA:
 
         # Initialize the sampler state.
         self.__initialize_state()
+
+        # Setup multiprocess pool
+        self.__pool = None
+        if self.__option.number_of_parallels > 1:
+            self.__pool = ProcessingPool(self.__option.number_of_parallels)
 
     def __setup_cma_parameter(self) -> None:
         """
@@ -327,7 +337,9 @@ class RegCMA:
         self.__set_start_time()
         self.__reset_function_call()
         self.__reset_iteration()
-        self.__print_state_head()
+
+        if option.verbose:
+            self.__print_state_head()
 
         is_state_printed_in_last_iteration = False
         while True:
@@ -336,11 +348,13 @@ class RegCMA:
             satisfy_terminating_condition = False
 
             # Terminate the loop if the elapsed time reaches the specified limit.
-            if current_state.elapsed_time * 1e-6 >= option.time_max:
+            if (option.time_max is not None
+                    and current_state.elapsed_time >= option.time_max):
                 satisfy_terminating_condition = True
 
             # Terminate the loop if the iteration reaches the specified limit.
-            if current_state.iteration >= option.iteration_max:
+            if (option.iteration_max is not None
+                    and current_state.iteration >= option.iteration_max):
                 satisfy_terminating_condition = True
 
             # Terminate the loop if the convergence index reaches within the
@@ -350,12 +364,13 @@ class RegCMA:
 
             # Terminate the loop if the number of function calls reaches the
             # specified limit.
-            if (current_state.function_call
+            if (option.function_call_max is not None
+                and current_state.function_call
                     > option.function_call_max - cma.population_size):
                 satisfy_terminating_condition = True
 
             if satisfy_terminating_condition:
-                if not is_state_printed_in_last_iteration:
+                if not is_state_printed_in_last_iteration and option.verbose:
                     self.__print_state_body()
                 break
 
@@ -368,8 +383,9 @@ class RegCMA:
             # Print log for the specified interval
             if current_state.iteration % option.log_interval == 0 \
                     or current_state.convergence_index < option.convergence_tolerance:
-                self.__print_state_body()
-                is_state_printed_in_last_iteration = True
+                if option.verbose:
+                    self.__print_state_body()
+                    is_state_printed_in_last_iteration = True
             else:
                 is_state_printed_in_last_iteration = False
 
@@ -383,7 +399,7 @@ class RegCMA:
 
     def __update_state(self) -> None:
         # NOTE: Update the sampler state. The dependencies of sub-methods are
-        # described in docstring of each method.
+        # described in comment in each method.
 
         # Store the current state.
         self.__previous_state = copy.copy(self.__current_state)
@@ -431,36 +447,30 @@ class RegCMA:
         option = self.__option
 
         # Decompose the current covariance matrix of considering the step size.
-        (d, B) = np.linalg.eig(
+        L = np.linalg.cholesky(
             current_state.covariance_with_step_size +
-            1E-20 * np.identity(current_state.dimension))
-
-        # Create an diagonal matrix whose elements are root of absolute values
-        # of the eigenvalues of the decomposed matrix. Absolute value
-        # calculations take into account when eigenvalues are negative due to
-        # numerical errors
-        D: Final(np.ndarray) = np.sqrt(np.abs(np.diag(d)))
-
-        # Compute a lower-triangle matrix.
-        L: Final(np.ndarray) = np.dot(B, D)
+            1E-20 * np.identity(current_state.dimension)
+        )
 
         for i in range(self.__cma.population_size):
             # Step 1: Sample random vectors from an appropriate standard
             # multivariate normal distribution
             current_state.raw_moves[i] = np.random.randn(
-                current_state.dimension)
+                current_state.dimension
+            )
 
             # Step 2: Transform the random vectors with the prepared lower-
             # triangle matrix.
             current_state.transformed_moves[i] = L.dot(
-                current_state.raw_moves[i])
+                current_state.raw_moves[i]
+            )
 
             # Step 3: Shift and scale the transformed random vectors. The
             # obtained vector could be final sample to be evaluated at each
             # iteration.
             current_state.solutions[i] = (
                 current_state.center
-                + np.sqrt(option.external_internal_regulator *
+                + np.sqrt(option.external_regulator *
                           current_state.internal_regulator)
                 * current_state.transformed_moves[i]
             )
@@ -489,13 +499,14 @@ class RegCMA:
                 )
 
         # Compute the objective function value for each sample.
-        if option.pool:
-            current_state.objectives = option.pool.map(
+        if self.__pool:
+            current_state.objectives = self.__pool.map(
                 self.__fun, current_state.solutions_evaluate)
         else:
             for i in range(self.__cma.population_size):
                 current_state.objectives[i] = self.__fun(
-                    current_state.solutions_evaluate[i])
+                    current_state.solutions_evaluate[i]
+                )
 
         # Compute the penalty value for each sample.
         for i in range(self.__cma.population_size):
@@ -539,7 +550,8 @@ class RegCMA:
 
         if current_state.objectives[best_index] < current_state.incumbent_objective:
             current_state.incumbent_objective = current_state.objectives[best_index]
-            current_state.incumbent_solution = current_state.solutions[best_index].copy(
+            current_state.incumbent_solution = (
+                current_state.solutions[best_index].copy()
             )
 
     def __update_evolution_path(self) -> None:
@@ -554,7 +566,7 @@ class RegCMA:
         cma = self.__cma
 
         # Compute the weighted center of y.
-        weighted_center_y = np.sum(
+        weighted_center_transformed_move = np.sum(
             [cma.weights[i] * current_state.transformed_moves[current_state.ranks[i]]
              for i in range(cma.half_population_size)], axis=0
         )
@@ -573,7 +585,8 @@ class RegCMA:
         # Update the evolution path with the mix-in ratios.
         current_state.evolution_path = (
             mixin_ratio_previous * previous_state.evolution_path
-            + mixin_ratio_current * weighted_center_y / previous_state.step_size
+            + mixin_ratio_current * weighted_center_transformed_move
+            / previous_state.step_size
         )
 
     def __update_conjugate_evolution_path(self) -> None:
@@ -588,7 +601,7 @@ class RegCMA:
         cma = self.__cma
 
         # Compute the weighted center of z.
-        weighted_center_z = np.sum(
+        weighted_center_raw_move = np.sum(
             [cma.weights[i] * current_state.raw_moves[current_state.ranks[i]]
              for i in range(cma.half_population_size)], axis=0
         )
@@ -605,9 +618,10 @@ class RegCMA:
         )
 
         # Update the conjugate evolution path with the mix-in ratios.
-        current_state.conjugate_evolution_path \
-            = mixin_ratio_previous * previous_state.conjugate_evolution_path \
-            + mixin_ratio_current * weighted_center_z
+        current_state.conjugate_evolution_path = (
+            mixin_ratio_previous * previous_state.conjugate_evolution_path
+            + mixin_ratio_current * weighted_center_raw_move
+        )
 
     def __update_step_size(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -623,7 +637,8 @@ class RegCMA:
         # Update the step size with the updated conjugate evolution path.
         current_state.step_size *= np.exp(
             (cma.learning_rate_conjugate_evolution_path / cma.step_size_damper)
-            * (np.linalg.norm(current_state.conjugate_evolution_path) / cma.chi_n - 1.0))
+            * (np.linalg.norm(current_state.conjugate_evolution_path) / cma.chi_n - 1.0)
+        )
 
     def __update_center(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -636,7 +651,7 @@ class RegCMA:
         cma = self.__cma
 
         # Compute the weighted center of x.
-        weighted_center_x = np.sum(
+        weighted_center_solution = np.sum(
             [cma.weights[i] * current_state.solutions[current_state.ranks[i]]
              for i in range(cma.half_population_size)], axis=0
         )
@@ -644,7 +659,7 @@ class RegCMA:
         # Update the center vector of the sampler with the mix-in ratios.
         current_state.center = (
             (1-cma.learning_rate_center) * current_state.center
-            + cma.learning_rate_center * weighted_center_x
+            + cma.learning_rate_center * weighted_center_solution
         )
 
     def __update_covariance(self) -> None:
@@ -668,10 +683,10 @@ class RegCMA:
             self_dyad(current_state.evolution_path)
         )
 
-        mixin_ratio_rank_mu = (
-            np.sum([cma.weights[i]
-                    * self_dyad(current_state.transformed_moves[current_state.ranks[i]])
-                    for i in range(cma.half_population_size)], axis=0)
+        mixin_ratio_rank_mu = (np.sum(
+            [cma.weights[i]
+             * self_dyad(current_state.transformed_moves[current_state.ranks[i]])
+             for i in range(cma.half_population_size)], axis=0)
             / pow(previous_state.step_size, 2.0)
         )
 
@@ -697,13 +712,15 @@ class RegCMA:
         current_state = self.__current_state
 
         current_state.covariance = (
-            current_state.covariance
-            * pow(current_state.step_size, 2.0))
+            current_state.covariance * pow(current_state.step_size, 2.0)
+        )
         current_state.step_size = 1.0
         current_state.covariance_with_step_size = current_state.covariance
 
         current_state.conjugate_evolution_path = np.zeros(
-            current_state.dimension)
+            current_state.dimension
+        )
+
         current_state.evolution_path = np.zeros(current_state.dimension)
 
     def __update_dispersion(self) -> None:
@@ -723,7 +740,7 @@ class RegCMA:
 
         # Update the dispersion.
         current_state.dispersion = (
-            option.external_internal_regulator * previous_state.internal_regulator
+            option.external_regulator * previous_state.internal_regulator
             * np.trace(previous_state.covariance_with_step_size)
             * np.exp(np.trace(np.cov(current_state.transformed_moves.T))
                      / np.trace(previous_state.covariance_with_step_size) - 1.0)
@@ -735,7 +752,7 @@ class RegCMA:
         option = self.__option
 
         # Update the theoretical dispersion.
-        current_state.dispersion_reference *= option.external_internal_regulator
+        current_state.dispersion_reference *= option.external_regulator
 
     def __bound_step_size_and_covariance(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -788,8 +805,8 @@ class RegCMA:
         current_state.internal_regulator = (
             pow(current_state.dispersion
                 / np.trace(current_state.covariance_with_step_size),
-                1.0 - option.decay_rate)
-            * pow(current_state.internal_regulator, option.decay_rate)
+                1.0 - option.attenuator)
+            * pow(current_state.internal_regulator, option.attenuator)
         )
 
     def __update_convergence_index(self) -> None:
@@ -801,7 +818,8 @@ class RegCMA:
 
         # Update the convergence index.
         current_state.convergence_index = np.mean(
-            np.var(current_state.solutions, axis=0))
+            np.var(current_state.solutions, axis=0)
+        )
 
     def __set_start_time(self) -> None:
         self.__current_state.start_time = datetime.now()
@@ -812,7 +830,7 @@ class RegCMA:
 
     def __update_elapsed_time(self) -> None:
         self.__current_state.elapsed_time = (
-            (datetime.now() - self.__current_state.start_time).microseconds
+            (datetime.now() - self.__current_state.start_time).total_seconds()
         )
 
     def __reset_function_call(self) -> None:
@@ -838,7 +856,7 @@ class RegCMA:
             'status': {
                 'start_time': current_state.start_time.isoformat(),
                 'end_time': current_state.end_time.isoformat(),
-                'elapsed_time': current_state.elapsed_time / 1000,
+                'elapsed_time': current_state.elapsed_time,
                 'function call': current_state.function_call,
             },
             'incumbent': {
@@ -868,17 +886,18 @@ class RegCMA:
             np.mean(current_state.objectives),
             np.std(current_state.objectives),
             current_state.incumbent_objective,
-            option.external_internal_regulator,
+            option.external_regulator,
             current_state.internal_regulator,
             current_state.step_size,
             current_state.covariance.trace(),
-            current_state.convergence_index))
+            current_state.convergence_index)
+        )
 
     def __print_state_footer(self) -> None:
         print('------+------------------+---------+-------------------+-------------------+---------')
 
 
-def solve(fun, x0, **kwargs):
+def solve(fun, x0, option=None):
     """ RegCMA solver Interface
 
     Parameters
@@ -892,8 +911,13 @@ def solve(fun, x0, **kwargs):
     **kwargs: dict
         Pairs of option key/value to configure the solver.
 
+    Returns
+    ------
+    dict
+        optimization result 
+
     """
-    solver = RegCMA(fun, x0, **kwargs)
+    solver = RegCMA(fun, x0, option)
     return solver.solve()
 
 ################################################################################
