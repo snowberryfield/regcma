@@ -6,8 +6,8 @@ import numpy as np
 def quadratic(x): return x.dot(x)
 
 # Define the initial solution.
-DIMENSION = 10
-x0 = np.random.randn(10)
+DIMENSION = 100
+x0 = np.random.randn(DIMENSION)
 
-result = regcma.solve(quadratic, x0)
+result = regcma.solve(quadratic, x0, {'iteration_max': 10000})
 print(result)
