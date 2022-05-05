@@ -46,9 +46,9 @@ class RegCMA:
         # Common options and their initial values.
         seed: int = 0
         population_size: int = None
-        time_max: float = 120.0
+        time_max: float = None
         iteration_max: int = 100000
-        function_call_max: int = 100000
+        function_call_max: int = None
         initial_covariance: float = 1E0
         convergence_tolerance: float = 1E-10
         lower_bounds: np.ndarray = None
@@ -348,11 +348,13 @@ class RegCMA:
             satisfy_terminating_condition = False
 
             # Terminate the loop if the elapsed time reaches the specified limit.
-            if current_state.elapsed_time * 1e-6 >= option.time_max:
+            if (option.time_max is not None
+                    and current_state.elapsed_time >= option.time_max):
                 satisfy_terminating_condition = True
 
             # Terminate the loop if the iteration reaches the specified limit.
-            if current_state.iteration >= option.iteration_max:
+            if (option.iteration_max is not None
+                    and current_state.iteration >= option.iteration_max):
                 satisfy_terminating_condition = True
 
             # Terminate the loop if the convergence index reaches within the
@@ -362,7 +364,8 @@ class RegCMA:
 
             # Terminate the loop if the number of function calls reaches the
             # specified limit.
-            if (current_state.function_call
+            if (option.function_call_max is not None
+                and current_state.function_call
                     > option.function_call_max - cma.population_size):
                 satisfy_terminating_condition = True
 
