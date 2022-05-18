@@ -61,7 +61,7 @@ class RegCMA:
         # RES options and their initial values.
         external_regulator: float = 1.0
         external_regulator_updater: callable = None
-        attenuator: float = 1.0
+        delay_factor: float = 1.0
         delta_limit: float = 5.0  # exp
 
         # CMA options and their initial values;
@@ -816,8 +816,8 @@ class RegCMA:
         current_state.internal_regulator = (
             pow(current_state.dispersion
                 / np.trace(current_state.covariance_with_step_size),
-                1.0 - option.attenuator)
-            * pow(current_state.internal_regulator, option.attenuator)
+                1.0 - option.delay_factor)
+            * pow(current_state.internal_regulator, option.delay_factor)
         )
 
     def __update_external_regulator(self) -> None:
