@@ -60,6 +60,7 @@ class RegCMA:
 
         # RES options and their initial values.
         external_regulator: float = 1.0
+        external_regulator_updater: callable = None
         attenuator: float = 1.0
         delta_limit: float = 5.0  # exp
 
@@ -67,6 +68,7 @@ class RegCMA:
         learning_rate_center: float = None
         learning_rate_covariance_rank_one: float = None
         learning_rate_covariance_rank_mu: float = None
+        is_enabled_step_size_adaption: bool = True
 
         # Parallelization
         number_of_parallels: int = 1
@@ -105,6 +107,7 @@ class RegCMA:
 
         # RES states and their initial values.
         internal_regulator: float = 1.0
+        external_regulator: float = 1.0
         dispersion: float = 0.0
         dispersion_reference: float = 0.0
 
@@ -318,6 +321,7 @@ class RegCMA:
         state.convergence_index = np.inf
 
         state.internal_regulator = 1.0
+        state.external_regulator = option.external_regulator
         state.dispersion = 1.0
         state.dispersion_reference = np.trace(state.covariance_with_step_size)
 
@@ -401,6 +405,9 @@ class RegCMA:
         # NOTE: Update the sampler state. The dependencies of sub-methods are
         # described in comment in each method.
 
+        # Create an alias to member object.
+        option = self.__option
+
         # Store the current state.
         self.__previous_state = copy.copy(self.__current_state)
 
@@ -408,7 +415,8 @@ class RegCMA:
         self.__update_conjugate_evolution_path()
 
         # Update the step_size
-        self.__update_step_size()
+        if option.is_enabled_step_size_adaption:
+            self.__update_step_size()
 
         # Update evolution_path.
         self.__update_evolution_path()
@@ -420,7 +428,7 @@ class RegCMA:
         self.__update_covariance()
 
         if (abs(np.log(self.__current_state.step_size))) \
-                > self.__option.step_size_and_covariance_normalize_threshold:
+                > option.step_size_and_covariance_normalize_threshold:
             self.__normalize_step_size_and_covariance()
 
         # Update the dispersion.
@@ -432,8 +440,12 @@ class RegCMA:
         # Bound the covariance matrix.
         self.__bound_step_size_and_covariance()
 
-        # Update the internal_regulator.
+        # Update the internal regulator.
         self.__update_internal_regulator()
+
+        # Update the external regulator.
+        if option.external_regulator_updater is not None:
+            self.__update_external_regulator()
 
         # Update the convergence index
         self.__update_convergence_index()
@@ -442,14 +454,13 @@ class RegCMA:
         np.random.seed(seed)
 
     def __update_sample(self) -> None:
-        # Create aliases to member objects.
+        # Create an alias to member object.
         current_state = self.__current_state
-        option = self.__option
 
         # Decompose the current covariance matrix of considering the step size.
         L = np.linalg.cholesky(
             current_state.covariance_with_step_size +
-            1E-20 * np.identity(current_state.dimension)
+            1E-16 * np.identity(current_state.dimension)
         )
 
         for i in range(self.__cma.population_size):
@@ -470,7 +481,7 @@ class RegCMA:
             # iteration.
             current_state.solutions[i] = (
                 current_state.center
-                + np.sqrt(option.external_regulator *
+                + np.sqrt(current_state.external_regulator *
                           current_state.internal_regulator)
                 * current_state.transformed_moves[i]
             )
@@ -809,6 +820,26 @@ class RegCMA:
             * pow(current_state.internal_regulator, option.attenuator)
         )
 
+    def __update_external_regulator(self) -> None:
+        # This method must be called after following methods at each iteration:
+        # * __update_sample()
+        # * __update_objective()
+        # * __update_ranks()
+        # * __update_evolution_path()
+        # * __update_conjugate_evolution_path()
+        # * __update_step_size()
+        # * __update_covariance()
+        # * __update_dispersion()
+        # * __bound_step_size_and_covariance()
+
+        # Create aliases to member objects.
+        current_state = self.__current_state
+        option = self.__option
+
+        # Update the internal regulator.
+        current_state.external_regulator = \
+            option.external_regulator_updater(current_state)
+
     def __update_convergence_index(self) -> None:
         # This method must be called after following methods at each iteration:
         # * __update_sample()
@@ -886,7 +917,7 @@ class RegCMA:
             np.mean(current_state.objectives),
             np.std(current_state.objectives),
             current_state.incumbent_objective,
-            option.external_regulator,
+            current_state.external_regulator,
             current_state.internal_regulator,
             current_state.step_size,
             current_state.covariance.trace(),
@@ -903,7 +934,7 @@ def solve(fun, x0, option=None):
     Parameters
     ----------
     fun : Function object
-        An objective function to be minimized which can compute objective 
+        An objective function to be minimized which can compute objective
         function values with the usage of fun(x), where x denotes a real-
         value vector with appropriate dimension.
     x0 : ndarray
@@ -914,7 +945,7 @@ def solve(fun, x0, option=None):
     Returns
     ------
     dict
-        optimization result 
+        optimization result
 
     """
     solver = RegCMA(fun, x0, option)
