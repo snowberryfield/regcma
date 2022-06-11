@@ -34,6 +34,11 @@
 import copy
 import numpy as np
 
+import bokeh.plotting
+import bokeh.models
+import bokeh.layouts
+import bokeh.palettes
+
 from pathos.multiprocessing import ProcessingPool
 from datetime import datetime
 from dataclasses import dataclass
@@ -104,6 +109,18 @@ class RegCMA:
         ranks: list = None
 
         convergence_index: float = np.inf
+
+        # Storages for historical plots.
+        augmented_objective_mean_trend: list = None
+        augmented_objective_best_trend: list = None
+        augmented_objective_stdev_trend: list = None
+        step_size_trend: list = None
+        condition_number_trend: list = None
+        internal_regulator_trend: list = None
+        external_regulator_trend: list = None
+        dispersion_trend: list = None
+        dispersion_trend_reference: list = None
+        convergence_index_trend: list = None
 
         # RES states and their initial values.
         internal_regulator: float = 1.0
@@ -320,6 +337,17 @@ class RegCMA:
 
         state.convergence_index = np.inf
 
+        state.augmented_objective_mean_trend = []
+        state.augmented_objective_best_trend = []
+        state.augmented_objective_stdev_trend = []
+        state.step_size_trend = []
+        state.condition_number_trend = []
+        state.internal_regulator_trend = []
+        state.external_regulator_trend = []
+        state.dispersion_trend = []
+        state.dispersion_trend_reference = []
+        state.convergence_index_trend = []
+
         state.internal_regulator = 1.0
         state.external_regulator = option.external_regulator
         state.dispersion = 1.0
@@ -447,8 +475,11 @@ class RegCMA:
         if option.external_regulator_updater is not None:
             self.__update_external_regulator()
 
-        # Update the convergence index
+        # Update the convergence index.
         self.__update_convergence_index()
+
+        # Update the trend.
+        self.__update_trend()
 
     def __seed(self, seed) -> None:
         np.random.seed(seed)
@@ -791,8 +822,13 @@ class RegCMA:
             else:
                 L: Final(float) = np.exp(option.delta_limit)
             CORRECTOR: Final(float) = np.sqrt(V * L)
-            current_state.covariance *= CORRECTOR
-            current_state.step_size *= np.sqrt(CORRECTOR)
+
+            if option.is_enabled_step_size_adaption:
+                current_state.covariance *= CORRECTOR
+                current_state.step_size *= np.sqrt(CORRECTOR)
+            else:
+                current_state.covariance *= CORRECTOR**2
+
             current_state.covariance_with_step_size = (
                 current_state.covariance * pow(current_state.step_size, 2.0)
             )
@@ -845,12 +881,56 @@ class RegCMA:
         # This method must be called after following methods at each iteration:
         # * __update_sample()
 
-        # Create aliases to member objects.
+        # Create an alias to member object.
         current_state = self.__current_state
 
         # Update the convergence index.
         current_state.convergence_index = np.mean(
             np.var(current_state.solutions, axis=0)
+        )
+
+    def __update_trend(self) -> None:
+        # Create an alias to member object.
+        current_state = self.__current_state
+
+        current_state.augmented_objective_best_trend.append(
+            current_state.augmented_objectives[current_state.ranks[0]]
+        )
+
+        current_state.augmented_objective_mean_trend.append(
+            np.mean(current_state.augmented_objectives)
+        )
+
+        current_state.augmented_objective_stdev_trend.append(
+            np.std(current_state.augmented_objectives)
+        )
+
+        current_state.step_size_trend.append(
+            current_state.step_size
+        )
+
+        current_state.condition_number_trend.append(
+            np.linalg.cond(current_state.covariance)
+        )
+
+        current_state.internal_regulator_trend.append(
+            current_state.internal_regulator
+        )
+
+        current_state.external_regulator_trend.append(
+            current_state.external_regulator
+        )
+
+        current_state.dispersion_trend.append(
+            current_state.dispersion
+        )
+
+        current_state.dispersion_trend_reference.append(
+            current_state.dispersion_reference
+        )
+
+        current_state.convergence_index_trend.append(
+            current_state.convergence_index
         )
 
     def __set_start_time(self) -> None:
@@ -880,7 +960,7 @@ class RegCMA:
         self.__current_state.iteration += 1
 
     def __create_result(self) -> dict:
-        # Create aliases to member objects.
+        # Create an alias to member object.
         current_state = self.__current_state
 
         # Create the result dictionary.
@@ -915,8 +995,8 @@ class RegCMA:
 
         print('%05d|%9.2e %9.2e|%9.2e|%9.2e %9.2e|%9.2e %9.2e|%9.2e' % (
             current_state.iteration,
-            np.mean(current_state.objectives),
-            np.std(current_state.objectives),
+            current_state.augmented_objective_mean_trend[-1],
+            current_state.augmented_objective_stdev_trend[-1],
             current_state.incumbent_objective,
             current_state.external_regulator,
             current_state.internal_regulator,
@@ -928,8 +1008,162 @@ class RegCMA:
     def __print_state_footer(self) -> None:
         print('------+------------------+---------+-------------------+-------------------+---------')
 
+    def plot_trend(self, output_file_name='result.html'):
+        # Create an alias to member object.
+        current_state = self.__current_state
+        colors = bokeh.palettes.brewer['YlGnBu'][4]
 
-def solve(fun, x0, option=None):
+        TOOLTIPS = [
+            ("index", "$index"),
+            ("(x,y)", "($x, $y)"),
+        ]
+
+        iterations = np.arange(
+            len(current_state.augmented_objective_best_trend))
+
+        # Objective
+        fig_objective = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Objective',
+            x_axis_label='Iteration',
+            y_axis_label='Objective',
+            x_range=bokeh.models.DataRange1d(start=0),
+            y_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300)
+
+        fig_objective.circle(
+            x=iterations,
+            y=current_state.augmented_objective_stdev_trend,
+            legend_label='Stdev',
+            width=3,
+            fill_alpha=0.8,
+            color=colors[1])
+
+        fig_objective.circle(
+            x=iterations,
+            y=current_state.augmented_objective_mean_trend,
+            legend_label='Mean',
+            width=3,
+            fill_alpha=0.8,
+            color=colors[0])
+
+        fig_objective.legend.visible = True
+
+        # Step Size
+        fig_step_size = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Step Size',
+            x_axis_label='Iteration',
+            y_axis_label='Step Size',
+            x_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300,
+            y_axis_type='log')
+
+        fig_step_size.line(
+            x=iterations,
+            y=current_state.step_size_trend,
+            width=3,
+            color=colors[0])
+
+        # Condition Number
+        fig_condition_number = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Condition Number',
+            x_axis_label='Iteration',
+            y_axis_label='Condition Number',
+            x_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300,
+            y_axis_type='log')
+
+        fig_condition_number.line(
+            x=iterations,
+            y=current_state.condition_number_trend,
+            width=3,
+            color=colors[0])
+
+        # Regulator
+        fig_regulator = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Regulator',
+            x_axis_label='Iteration',
+            y_axis_label='Regulator',
+            x_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300,
+            y_axis_type='log')
+
+        fig_regulator.line(
+            x=iterations,
+            y=current_state.internal_regulator_trend,
+            legend_label='Internal',
+            width=3,
+            color=colors[0])
+
+        fig_regulator.line(
+            x=iterations,
+            y=current_state.external_regulator_trend,
+            legend_label='External',
+            width=3,
+            color=colors[1])
+
+        fig_regulator.legend.visible = True
+
+        # Dispersion
+        fig_dispersion = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Dispersion',
+            x_axis_label='Iteration',
+            y_axis_label='Dispersion',
+            x_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300,
+            y_axis_type='log')
+
+        fig_dispersion.line(
+            x=iterations,
+            y=current_state.dispersion_trend,
+            legend_label='Actual',
+            width=3,
+            color=colors[0])
+
+        fig_dispersion.line(
+            x=iterations,
+            y=current_state.dispersion_trend_reference,
+            legend_label='Theoretical Reference',
+            width=3,
+            color=colors[1])
+
+        fig_dispersion.legend.visible = True
+
+        # Convergence Index
+        fig_convergence_index = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Convergence Index',
+            x_axis_label='Iteration',
+            y_axis_label='Convergence Index',
+            x_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300,
+            y_axis_type='log')
+
+        fig_convergence_index.line(
+            x=iterations,
+            y=current_state.convergence_index_trend,
+            width=3,
+            color=colors[0])
+
+        grid = bokeh.layouts.gridplot(
+            [[fig_objective, fig_step_size],
+             [fig_condition_number, fig_regulator],
+             [fig_dispersion, fig_convergence_index]])
+        bokeh.plotting.output_file(output_file_name, title='RegCMA Trend')
+        bokeh.plotting.save(grid)
+
+
+def solve(fun, x0, option=None, plot=False):
     """ RegCMA solver Interface
 
     Parameters
@@ -950,7 +1184,11 @@ def solve(fun, x0, option=None):
 
     """
     solver = RegCMA(fun, x0, option)
-    return solver.solve()
+    result = solver.solve()
+    if plot:
+        solver.plot_trend()
+
+    return result
 
 ################################################################################
 # END
