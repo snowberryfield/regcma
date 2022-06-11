@@ -502,12 +502,12 @@ class RegCMA:
             if option.lower_bounds is not None:
                 current_state.solutions_evaluate[i] = (
                     np.maximum(current_state.solutions_evaluate[i],
-                               option.lower_bounds)
+                               np.array(option.lower_bounds))
                 )
             if option.upper_bounds is not None:
                 current_state.solutions_evaluate[i] = (
                     np.minimum(current_state.solutions_evaluate[i],
-                               option.upper_bounds)
+                               np.array(option.upper_bounds))
                 )
 
         # Compute the objective function value for each sample.
