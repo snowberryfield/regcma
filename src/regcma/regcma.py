@@ -560,8 +560,8 @@ class RegCMA:
         # Update the incumbent solution if the current best solution improves it.
         best_index = current_state.ranks[0]
 
-        if current_state.objectives[best_index] < current_state.incumbent_objective:
-            current_state.incumbent_objective = current_state.objectives[best_index]
+        if current_state.augmented_objectives[best_index] < current_state.incumbent_objective:
+            current_state.incumbent_objective = current_state.augmented_objectives[best_index]
             current_state.incumbent_solution = (
                 current_state.solutions[best_index].copy()
             )
