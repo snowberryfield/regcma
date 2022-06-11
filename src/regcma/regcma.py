@@ -457,11 +457,12 @@ class RegCMA:
         # Create an alias to member object.
         current_state = self.__current_state
 
-        # Decompose the current covariance matrix of considering the step size.
-        L = np.linalg.cholesky(
+        (d, B) = np.linalg.eig(
             current_state.covariance_with_step_size +
-            1E-16 * np.identity(current_state.dimension)
-        )
+            1E-16 * np.identity(current_state.dimension))
+
+        D: Final(np.ndarray) = np.diag(np.sqrt([np.linalg.norm(v) for v in d]))
+        L: Final(np.ndarray) = np.dot(B, D)
 
         for i in range(self.__cma.population_size):
             # Step 1: Sample random vectors from an appropriate standard
