@@ -1,2 +1,3 @@
 numpy >= 1.15
 pathos >= 0.2.8
+bokeh >= 2.3.3
