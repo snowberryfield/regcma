@@ -19,9 +19,16 @@ def quadratic(x): return x.dot(x)
 DIMENSION = 10
 x0 = np.random.randn(DIMENSION)
 
-result = regcma.solve(quadratic, x0)
+option = {
+    'iteration_max' : 100
+}
+
+result = regcma.solve(quadratic, x0, option)
 print(result)
 ```
+
+## Options
+Please refer [List of Options](options.md). RegCMA works as CMA-ES with the default option setting.
 
 ## License
 **RegCMA** is distributed under [MIT license](https://opensource.org/licenses/MIT).
