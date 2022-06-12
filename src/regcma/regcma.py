@@ -62,6 +62,7 @@ class RegCMA:
         verbose: bool = True
         log_interval: int = 100
         step_size_and_covariance_normalize_threshold: float = 10.0  # exp
+        is_enabled_restart: bool = False
 
         # RES options and their initial values.
         external_regulator: float = 1.0
@@ -389,10 +390,13 @@ class RegCMA:
                     and current_state.iteration >= option.iteration_max):
                 satisfy_terminating_condition = True
 
-            # Terminate the loop if the convergence index reaches within the
-            # specified tolerance.
             if current_state.convergence_index < option.convergence_tolerance:
-                satisfy_terminating_condition = True
+                if option.is_enabled_restart:
+                    self.__reset_distribution()
+                else:
+                    # Terminate the loop if the convergence index reaches within the
+                    # specified tolerance.
+                    satisfy_terminating_condition = True
 
             # Terminate the loop if the number of function calls reaches the
             # specified limit.
@@ -959,6 +963,28 @@ class RegCMA:
     def __next_iteration(self) -> None:
         self.__current_state.iteration += 1
 
+    def __reset_distribution(self) -> None:
+        # Create aliases to member objects.
+        state = self.__current_state
+        option = self.__option
+
+        dimension = state.dimension
+
+        state.covariance = np.identity(dimension) * option.initial_covariance
+        state.step_size = 1.0
+        state.covariance_with_step_size = state.covariance
+        state.internal_regulator = 1.0
+        state.external_regulator = option.external_regulator
+        state.dispersion = 1.0
+        state.dispersion_reference = np.trace(
+            state.covariance_with_step_size)
+
+        state.evolution_path = np.zeros(dimension)
+        state.conjugate_evolution_path = np.zeros(dimension)
+
+        self.__current_state = state
+        self.__previous_state = copy.deepcopy(self.__current_state)
+
     def __create_result(self) -> dict:
         # Create an alias to member object.
         current_state = self.__current_state
@@ -1028,7 +1054,6 @@ class RegCMA:
             x_axis_label='Iteration',
             y_axis_label='Objective',
             x_range=bokeh.models.DataRange1d(start=0),
-            y_range=bokeh.models.DataRange1d(start=0),
             plot_width=500,
             plot_height=300)
 
