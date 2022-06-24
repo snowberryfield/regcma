@@ -995,7 +995,7 @@ class RegCMA:
                 'start_time': current_state.start_time.isoformat(),
                 'end_time': current_state.end_time.isoformat(),
                 'elapsed_time': current_state.elapsed_time,
-                'function call': current_state.function_call,
+                'function_call': current_state.function_call,
             },
             'incumbent': {
                 'solution': current_state.incumbent_solution.tolist(),
