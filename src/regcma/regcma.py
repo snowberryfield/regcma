@@ -32,6 +32,7 @@
 # THE SOFTWARE.
 
 import copy
+import math
 import numpy as np
 
 import bokeh.plotting
@@ -65,9 +66,9 @@ class RegCMA:
         is_enabled_restart: bool = False
 
         # RES options and their initial values.
-        external_regulator: float = 1.0
-        external_regulator_updater: callable = None
-        delay_factor: float = 1.0
+        is_enabled_regulation: bool = True
+        external_regulator: float = None
+        delay_factor: float = 0.1
         delta_limit: float = 5.0  # exp
 
         # CMA options and their initial values;
@@ -112,6 +113,7 @@ class RegCMA:
         convergence_index: float = np.inf
 
         # Storages for historical plots.
+        elapsed_time_trend: list = None
         augmented_objective_mean_trend: list = None
         augmented_objective_best_trend: list = None
         augmented_objective_stdev_trend: list = None
@@ -119,15 +121,13 @@ class RegCMA:
         condition_number_trend: list = None
         internal_regulator_trend: list = None
         external_regulator_trend: list = None
-        dispersion_trend: list = None
-        dispersion_trend_reference: list = None
         convergence_index_trend: list = None
+        convergence_index_reference_trend: list = None
 
         # RES states and their initial values.
         internal_regulator: float = 1.0
         external_regulator: float = 1.0
         dispersion: float = 0.0
-        dispersion_reference: float = 0.0
 
         # CMA states and their initial values.
         evolution_path: np.ndarray = None
@@ -336,8 +336,7 @@ class RegCMA:
         state.augmented_objectives = np.inf * np.ones(population_size)
         state.ranks = None
 
-        state.convergence_index = np.inf
-
+        state.elapsed_time_trend = []
         state.augmented_objective_mean_trend = []
         state.augmented_objective_best_trend = []
         state.augmented_objective_stdev_trend = []
@@ -345,14 +344,23 @@ class RegCMA:
         state.condition_number_trend = []
         state.internal_regulator_trend = []
         state.external_regulator_trend = []
-        state.dispersion_trend = []
-        state.dispersion_trend_reference = []
         state.convergence_index_trend = []
+        state.convergence_index_reference_trend = []
+
+        state.dispersion = np.trace(state.covariance_with_step_size)
 
         state.internal_regulator = 1.0
-        state.external_regulator = option.external_regulator
-        state.dispersion = 1.0
-        state.dispersion_reference = np.trace(state.covariance_with_step_size)
+        if option.external_regulator is not None:
+            state.external_regulator = option.external_regulator
+        if option.is_enabled_regulation:
+            state.external_regulator = math.pow(
+                option.convergence_tolerance / (state.dispersion
+                                                * dimension), 1.0 / option.iteration_max)
+        else:
+            state.external_regulator = 1.0
+
+        state.convergence_index = state.dispersion / dimension
+        state.convergence_index_reference = state.dispersion / dimension
 
         state.evolution_path = np.zeros(dimension)
         state.conjugate_evolution_path = np.zeros(dimension)
@@ -443,7 +451,10 @@ class RegCMA:
         # Store the current state.
         self.__previous_state = copy.copy(self.__current_state)
 
-        # Update conjugate_evolution_path.
+        # Update the elapsed time.
+        self.__update_elapsed_time()
+
+        # Update the conjugate evolution path.
         self.__update_conjugate_evolution_path()
 
         # Update the step_size
@@ -466,21 +477,17 @@ class RegCMA:
         # Update the dispersion.
         self.__update_dispersion()
 
-        # Update the the dispersion reference.
-        self.__update_dispersion_reference()
-
         # Bound the covariance matrix.
         self.__bound_step_size_and_covariance()
 
         # Update the internal regulator.
         self.__update_internal_regulator()
 
-        # Update the external regulator.
-        if option.external_regulator_updater is not None:
-            self.__update_external_regulator()
-
         # Update the convergence index.
         self.__update_convergence_index()
+
+        # Update the convergence index reference.
+        self.__update_convergence_index_reference()
 
         # Update the trend.
         self.__update_trend()
@@ -783,23 +790,14 @@ class RegCMA:
         # Create aliases to member objects.
         current_state = self.__current_state
         previous_state = self.__previous_state
-        option = self.__option
 
         # Update the dispersion.
         current_state.dispersion = (
-            option.external_regulator * previous_state.internal_regulator
+            current_state.external_regulator * previous_state.internal_regulator
             * np.trace(previous_state.covariance_with_step_size)
             * np.exp(np.trace(np.cov(current_state.transformed_moves.T))
                      / np.trace(previous_state.covariance_with_step_size) - 1.0)
         )
-
-    def __update_dispersion_reference(self) -> None:
-        # Create aliases to member objects.
-        current_state = self.__current_state
-        option = self.__option
-
-        # Update the theoretical dispersion.
-        current_state.dispersion_reference *= option.external_regulator
 
     def __bound_step_size_and_covariance(self) -> None:
         # This method must be called after following methods at each iteration:
@@ -861,26 +859,6 @@ class RegCMA:
             * pow(current_state.internal_regulator, option.delay_factor)
         )
 
-    def __update_external_regulator(self) -> None:
-        # This method must be called after following methods at each iteration:
-        # * __update_sample()
-        # * __update_objective()
-        # * __update_ranks()
-        # * __update_evolution_path()
-        # * __update_conjugate_evolution_path()
-        # * __update_step_size()
-        # * __update_covariance()
-        # * __update_dispersion()
-        # * __bound_step_size_and_covariance()
-
-        # Create aliases to member objects.
-        current_state = self.__current_state
-        option = self.__option
-
-        # Update the internal regulator.
-        current_state.external_regulator = \
-            option.external_regulator_updater(current_state)
-
     def __update_convergence_index(self) -> None:
         # This method must be called after following methods at each iteration:
         # * __update_sample()
@@ -893,9 +871,20 @@ class RegCMA:
             np.var(current_state.solutions, axis=0)
         )
 
+    def __update_convergence_index_reference(self) -> None:
+        # Create aliases to member objects.
+        current_state = self.__current_state
+
+        # Update the theoretical dispersion.
+        current_state.convergence_index_reference *= current_state.external_regulator
+
     def __update_trend(self) -> None:
         # Create an alias to member object.
         current_state = self.__current_state
+
+        current_state.elapsed_time_trend.append(
+            current_state.elapsed_time
+        )
 
         current_state.augmented_objective_best_trend.append(
             current_state.augmented_objectives[current_state.ranks[0]]
@@ -925,16 +914,12 @@ class RegCMA:
             current_state.external_regulator
         )
 
-        current_state.dispersion_trend.append(
-            current_state.dispersion
-        )
-
-        current_state.dispersion_trend_reference.append(
-            current_state.dispersion_reference
-        )
-
         current_state.convergence_index_trend.append(
             current_state.convergence_index
+        )
+
+        current_state.convergence_index_reference_trend.append(
+            current_state.convergence_index_reference
         )
 
     def __set_start_time(self) -> None:
@@ -974,10 +959,10 @@ class RegCMA:
         state.step_size = 1.0
         state.covariance_with_step_size = state.covariance
         state.internal_regulator = 1.0
-        state.external_regulator = option.external_regulator
-        state.dispersion = 1.0
-        state.dispersion_reference = np.trace(
-            state.covariance_with_step_size)
+
+        state.dispersion = np.trace(state.covariance_with_step_size)
+        state.convergence_index = state.dispersion / dimension
+        state.convergence_index_reference = state.dispersion / dimension
 
         state.evolution_path = np.zeros(dimension)
         state.conjugate_evolution_path = np.zeros(dimension)
@@ -1011,7 +996,7 @@ class RegCMA:
     def __print_state_head(self) -> None:
         print('-----+-------------------+---------+-------------------+-------------------+---------')
         print('     |        Current    |  Total  |     Regulator     |      Variance     |  Conv.')
-        print('ITER.|     mean     stdev|   min   | external  internal| stepsize    covar.|  index')
+        print('ITER.|     mean     stdev|   min   | external  internal| stepsize   Tr(Cov)|  index')
         print('-----+-------------------+---------+-------------------+-------------------+---------')
 
     def __print_state_body(self) -> None:
@@ -1046,6 +1031,22 @@ class RegCMA:
 
         iterations = np.arange(
             len(current_state.augmented_objective_best_trend))
+
+        # Elapsed Time
+        fig_elapsed_time = bokeh.plotting.figure(
+            tooltips=TOOLTIPS,
+            title='Elapsed Time',
+            x_axis_label='Iteration',
+            y_axis_label='Elapsed Time[sec]',
+            x_range=bokeh.models.DataRange1d(start=0),
+            plot_width=500,
+            plot_height=300)
+
+        fig_elapsed_time.line(
+            x=iterations,
+            y=current_state.elapsed_time_trend,
+            width=3,
+            color=colors[0])
 
         # Objective
         fig_objective = bokeh.plotting.figure(
@@ -1136,33 +1137,6 @@ class RegCMA:
 
         fig_regulator.legend.visible = True
 
-        # Dispersion
-        fig_dispersion = bokeh.plotting.figure(
-            tooltips=TOOLTIPS,
-            title='Dispersion',
-            x_axis_label='Iteration',
-            y_axis_label='Dispersion',
-            x_range=bokeh.models.DataRange1d(start=0),
-            plot_width=500,
-            plot_height=300,
-            y_axis_type='log')
-
-        fig_dispersion.line(
-            x=iterations,
-            y=current_state.dispersion_trend,
-            legend_label='Actual',
-            width=3,
-            color=colors[0])
-
-        fig_dispersion.line(
-            x=iterations,
-            y=current_state.dispersion_trend_reference,
-            legend_label='Theoretical Reference',
-            width=3,
-            color=colors[1])
-
-        fig_dispersion.legend.visible = True
-
         # Convergence Index
         fig_convergence_index = bokeh.plotting.figure(
             tooltips=TOOLTIPS,
@@ -1177,13 +1151,23 @@ class RegCMA:
         fig_convergence_index.line(
             x=iterations,
             y=current_state.convergence_index_trend,
+            legend_label='Result',
             width=3,
             color=colors[0])
 
+        fig_convergence_index.line(
+            x=iterations,
+            y=current_state.convergence_index_reference_trend,
+            legend_label='Theoretical Reference',
+            width=3,
+            color=colors[1])
+
+        fig_convergence_index.legend.visible = True
+
         grid = bokeh.layouts.gridplot(
-            [[fig_objective, fig_step_size],
-             [fig_condition_number, fig_regulator],
-             [fig_dispersion, fig_convergence_index]])
+            [[fig_elapsed_time, fig_objective],
+             [fig_step_size, fig_condition_number],
+             [fig_regulator, fig_convergence_index]])
         bokeh.plotting.output_file(output_file_name, title='RegCMA Trend')
         bokeh.plotting.save(grid)
 
