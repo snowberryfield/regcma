@@ -18,10 +18,10 @@
 | `number_of_parallels`   |    `int`     |                       `1`                        | Number of threads to parallelize the computation of objective function values.                                                |
 
 ## Options on Regulated Evolution Strategies
-| Name                 |  Type   | Default | Description                                                                                                                                      |
-|:---------------------|:-------:|:-------:|:-------------------------------------------------------------------------------------------------------------------------------------------------|
-| `external_regulator` | `float` |  `1.0`  | Regulator for sample dispersion convergence. Values smaller than `1.0` (with `delay_factor < 1.0`) guarantee the convergence.                    |
-| `delay_factor`       | `float` |  `1.0`  | Delay factor for current covariance matrix. Values smaller than `1.0` delays the influence of the current covariance matrix to subsequent steps. |
+| Name                 |  Type   |                Default                | Description                                                                                                                                      |
+|:---------------------|:-------:|:-------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `external_regulator` | `float` | `None`<br/>(Automatically Determined) | Regulator for sample dispersion convergence. Values smaller than `1.0` (with `delay_factor < 1.0`) guarantee the convergence.                    |
+| `delay_factor`       | `float` |                 `0.1`                 | Delay factor for current covariance matrix. Values smaller than `1.0` delays the influence of the current covariance matrix to subsequent steps. |
 
 ## Options on Covariance Matrix Adaption
 | Name                                |  Type   |                     Default                      | Description                                                                                |
