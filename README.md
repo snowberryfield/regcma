@@ -6,53 +6,47 @@
 pip install git+https://github.com/snowberryfield/regcma.git
 ```
 
-## Algorithm
+## Regulated Evolution Strategies
 **Regulated Evolution Strategies** *(hereinafter referred to as RES)* is a evolutionary algorithm framework to attempts to find reasonable solutions of following unconstrained minimization problems:
 
 $$
-(\mathrm{P}): \underset{\boldsymbol{x}}{\mathrm{minimize}}\enspace f(\boldsymbol{x})
+(\mathrm{P}): \underset{x}{\mathrm{minimize}}\enspace f(x)
 $$
 
-where $\boldsymbol{x}$ denotes $N$-dimensional decision variables, and $f:R^N \mapsto R$ denotes "Black-Box" objective function to be minimized. RES-based algorithm should satisfy the following updating structure:
+where $x$ denotes $N$-dimensional decision variables, and $f:R^N \mapsto R$ denotes "Black-Box" objective function to be minimized. A RES-based algorithm should satisfy the following updating structure:
 
 $$
 \begin{aligned}
-\boldsymbol{x}^{p}(k) &= \boldsymbol{\mu}(k) + \sqrt{\alpha(k) r(k)} \boldsymbol{y}^{p}(k) \enspace (p=1,\dots,P), \\
- \boldsymbol{S}_{\boldsymbol{y}}(k) &= \frac{1}{P} \sum_{p=1}^{P} \boldsymbol{y}^{p}(k)\boldsymbol{y}^{p\top}(k), \\
-T(k)          &= \alpha(k) r(k) \mathrm{Tr}  \boldsymbol{C}(k) \exp \left(\frac{\mathrm{Tr} \boldsymbol{S}_{\boldsymbol{y}}(k)}{\mathrm{Tr}  \boldsymbol{C}(k)} - 1\right), \\
-r(k+1)        &= \left(\frac{T(k)}{\mathrm{Tr} \boldsymbol{C}(k+1)} \right)^{1-\beta}r^{\beta}(k),
+x^{p}(k) &= \mu(k) + \sqrt{\alpha(k) r(k)} y^{p}(k) \enspace (p\in\mathcal{P}), \\
+S_{y}(k) &= \frac{1}{\lvert \mathcal{P}\rvert} \sum_{p\in\mathcal{P}} y^{p}(k)y^{p\top}(k), \\
+T(k) &= \alpha(k) r(k) \mathrm{Tr}  C(k) \exp \left(\frac{\mathrm{Tr} S_{y}(k)}{\mathrm{Tr}  C(k)} - 1\right), \\
+r(k+1) &= \left(\frac{T(k)}{\mathrm{Tr} C(k+1)} \right)^{1-\beta}r^{\beta}(k),
 \end{aligned}
 $$
 
-where $k = 0,1,\dots$ denotes the iteration, $P \in \mathbb{N}$ denotes the number of samples and $\boldsymbol{x}^{p}(k) \in \mathbb{R}^{N}$ denote individual samples. The random vector $\boldsymbol{y}^{p}(k) \in \mathbb{R}^{N}$ to generate $\boldsymbol{x}^{p}(k)$ are drawn from ${\cal N}(\boldsymbol{0},\boldsymbol{C}(k))$. In RES framework, the distribution parameters $\boldsymbol{\mu}(k) \in \mathbb{R}^{N}$ and $\boldsymbol{C}(k) \in \mathbb{R}^{N \times N}$ can be updated in an arbitrary manner, meanwhile RegCMA employs that of CMA-ES. The symbol $r(k)$ is the *internal* regulator that attenuates the influence of the current covariance matrix $\boldsymbol{C}(k)$ on $k \to \infty$. It is initialized by $r(k)=1$ and updated by with the delay factor $\beta \in (0,1)$. The *external* regulator $\alpha(k) \in\{0,1\}$ is also a parameter that controls convergence speed of the sample dispersion (In this program, only constant $\alpha$ can be specified). Internal state $T(k)$, which indicates the dispersion of samples, is an intentional approximation of 
+where $k = 0,1,\dots$ denotes the iteration, $\mathcal{P} = \lbrace 1,\dots,\lvert \mathcal{P}\rvert\rbrace$ denotes the index set for samples, and $x^{p}(k) \in \mathbb{R}^{N}(p\in\mathcal{P})$ denote individual samples. Random vectors $y^{p}(k) \in \mathbb{R}^{N}(p\in\mathcal{P})$ are drawn from ${\cal N}(0,C(k))$. The distribution parameters $\mu(k) \in \mathbb{R}^{N}$ and $C(k) \in \mathbb{R}^{N \times N}$ can be updated in an arbitrary manner, meanwhile RegCMA employs the manner of CMA-ES[2]. The state $r(k)$ should be called *internal regulator*, which attenuates the influence of $C(k)$ in future. It is initialized by $r(0)=1$ and updated with the delay factor parameter $\beta \in (0,1)$. In contrast, the parameter $\alpha(k) \in\{0,1\}$ should be called *external regulator*, which controls convergence speed of the sample dispersion. The state $T(k)$ indicating the sample dispersion in the framework, is an intentional approximation of $\mathrm{Tr} S_{x}(k) =  \frac{1}{\lvert \mathcal{P}\rvert}\sum_{p\in\mathcal{P}} (x^{p}(k)-\mu(k))(x^{p}(k)-\mu(k))^{\top}$ to enable rigorous analysis. 
 
-$$
-\mathrm{Tr} \boldsymbol{S}_{\boldsymbol{x}}(k) = \sum_{p=1}^{P} \frac{1}{P} \boldsymbol{x}^{p}(k)\boldsymbol{x}^{p\top}(k)
-$$
+The RES framework provides the following theorem that states convergence of sample dispersion.
 
-to enable rigorous analysis of the RES framework.
-
-RES provides the following theorem that states convergence of sample dispersion.
-
-**Theorem (Sufficient stability condition of RES-based algorithms) [1]**: Let ${\cal A}$ denote an RES-based algorithm. Suppose that the constants $L_{\log \alpha}(k) \in \mathbb{R}$ and $L_{\log r} > 0$ exist such that $\log \alpha(k) \le L_{\log \alpha}(k) < +\infty (\forall k\ge 0)$ and $\left\lvert \log  T(k) / \mathrm{Tr} \boldsymbol{C}(k+1) \right\rvert \le L_{\log r} < +\infty\, (\forall k\ge 0)$. We also assume that $\boldsymbol{y}^{p}(k) \, (k \ge 0, p=1,\dots,P)$ are independent of each other. If ${\cal A}$ is designed so that
+**Theorem 1 [1]**: Let ${\cal A}$ denote an RES-based algorithm. Suppose there exist constants $L_{\log \alpha}(k) \in \mathbb{R}$ and $L_{\log r} > 0$ such that $\log \alpha(k) \le L_{\log \alpha}(k) < +\infty \enspace  (\forall k\ge 0)$ and $\left\lvert \log  T(k) / \mathrm{Tr} C(k+1) \right\rvert \le L_{\log r} < +\infty \enspace (\forall k\ge 0)$. In addition, suppose $y^{p}(k) \enspace (k \ge 0, p\in\mathcal{P})$ be independent of each other. If ${\cal A}$ is designed so that 
 
 $$
 \lim_{k \to \infty} \frac{1}{\sqrt{k+1}} \sum_{\kappa=0}^{k} L_{\log \alpha}(\kappa) = -\infty,
 $$
 
-then
+then 
 
 $$
-\lim_{k \to \infty} \Pr \left(T(k) \ge \varepsilon \right) = 0\, (\forall \varepsilon > 0)
+\lim_{k \to \infty} \Pr \left(T(k) \ge \varepsilon \right) = 0 \enspace (\forall \varepsilon > 0)
 $$
 
-holds. Also, as a byproduct of this theorem, the following estimator is obtained:
+holds. Also, as a byproduct of this theorem, we have the following estimator:
 
 $$
-\log T(k) \approx \sum_{\kappa=0}^{k}\log \alpha(\kappa) + \log \mathrm{Tr} \boldsymbol{C}(0).
+\log T(k) \approx \sum_{\kappa=0}^{k}\log \alpha(\kappa) + \log \mathrm{Tr} C(0).
 $$
 
-With this estimator, we can design the value of $\alpha(k)$ with allowed iteration and target tolerance of $T(\simeq \boldsymbol{S}_{\boldsymbol{x}})$.
+With this estimator, we can design the value of $\alpha(k)$ with allowed maximum number iterations and target tolerance of $T(\simeq S_{x})$.
 
 ## Example
 
@@ -77,7 +71,7 @@ option = {
 result = regcma.solve(quadratic, x0, option, plot=True)
 ```
 
-In the example above, RegCMA minimizes the objective function with regulating its sampling dispersion so that the convergence index (mean of diagonal components of the $\boldsymbol{S}_{\boldsymbol{x}}$) gradually reaches `1E-10` at iteration `100`. The following plot depicts the search trend. The chart of *Convergence Index* shows that actual convergence index tracks the theoretical reference.
+In the example above, RegCMA minimizes the objective function with regulating its sampling dispersion so that the convergence index (mean of diagonal components of the $S_{x}$) gradually reaches `1E-10` at iteration `100`. The following plot depicts the search trend. The chart of *Convergence Index* shows that actual convergence index tracks the theoretical reference.
 
 ![](./asset/sample_plot.png)
 
@@ -93,3 +87,4 @@ https://onlinelibrary.wiley.com/doi/abs/10.1002/tee.23201
 
 - [2]  N.Hansen: The CMA Evolution Strategy: A Tutorial, arXiv:1604.00772 [cs.LG] (2016). 
 https://arxiv.org/abs/1604.00772
+
