@@ -355,7 +355,7 @@ class RegCMA:
         elif option.is_enabled_regulation:
             state.external_regulator = math.pow(
                 option.convergence_tolerance / (state.dispersion
-                                                * dimension), 1.0 / option.iteration_max)
+                                                / dimension), 1.0 / option.iteration_max)
         else:
             state.external_regulator = 1.0
 
